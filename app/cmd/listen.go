@@ -1,5 +1,5 @@
 /*
-Copyright © 2020 NAME HERE <EMAIL ADDRESS>
+Copyright © 2020 NAME HERE paul@majestik.org
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,18 +16,26 @@ limitations under the License.
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"log"
-	"log/syslog"
 
+	// "log/syslog"
+	"net"
+	"time"
+
+	"github.com/crewjam/rfc5424"
+	"github.com/jeromer/syslogparser/rfc3164"
 	"github.com/spf13/cobra"
-	syslogv2 "gopkg.in/mcuadros/go-syslog.v2"
+	"github.com/tidwall/evio"
 )
 
 //
 var target_ip string
 var target_port string
 var listen_port string
+
+const maxBufferSize = 1024
 
 // listenCmd represents the listen command
 var listenCmd = &cobra.Command{
@@ -42,32 +50,53 @@ var listenCmd = &cobra.Command{
 
 func listen() {
 	fmt.Printf("Forwarding to %v:%v\n", target_ip, target_port)
-	channel := make(syslogv2.LogPartsChannel)
-	handler := syslogv2.NewChannelHandler(channel)
 
-	// setup the server
-	server := syslogv2.NewServer()
-	server.SetFormat(syslogv2.RFC5424)
-	server.SetHandler(handler)
-	server.ListenUDP(fmt.Sprintf("0.0.0.0:%v", listen_port))
-	server.Boot()
+	var events evio.Events
 
-	// dial the client
-	syslog_target := fmt.Sprintf("%v:%v", target_ip, target_port)
-	logwriter, e := syslog.Dial("tcp", syslog_target, syslog.LOG_DEBUG, "syslog_forwarder")
-	if e != nil {
-		log.Fatal(e)
+	// events call
+	events.Data = func(c evio.Conn, in []byte) (out []byte, action evio.Action) {
+
+		// Parse the incoming UDP message as a RFC3164 BSD Syslog message
+		p := rfc3164.NewParser(in)
+		err := p.Parse()
+		if err != nil {
+			panic(err)
+		}
+
+		// Dump the parsed message into a list so we can rebuild it into a RFC5424 message
+		arr := p.Dump()
+
+		// Build a RFC5424 message
+		m := rfc5424.Message{
+			Priority:  rfc5424.Daemon | rfc5424.Info,
+			Timestamp: arr["timestamp"].(time.Time),
+			Hostname:  arr["hostname"].(string),
+			AppName:   arr["tag"].(string),
+			Message:   []byte(arr["content"].(string)),
+		}
+
+		// Setup an IO buffer and fill it with the RFC5424 message
+		buf := new(bytes.Buffer)
+		m.WriteTo(buf)
+
+		// Connect to the TCP Syslog server
+		conn, e := net.Dial("tcp", fmt.Sprintf("%v:%v", target_ip, target_port))
+		if e != nil {
+			log.Fatal(e)
+		}
+
+		// Send the message to the Syslog server
+		fmt.Fprintf(conn, buf.String())
+
+		// Close the connection and return
+		_ = conn.Close()
+		return
 	}
 
-	logwriter.Info("Syslog Forwarder starting up")
-
-	go func(channel syslogv2.LogPartsChannel) {
-		for logParts := range channel {
-			fmt.Println(logParts)
-		}
-	}(channel)
-
-	server.Wait()
+	// Serve Loop
+	if err := evio.Serve(events, fmt.Sprintf("udp://0.0.0.0:%v", listen_port)); err != nil {
+		panic(err.Error())
+	}
 }
 
 func init() {
@@ -78,14 +107,4 @@ func init() {
 	listenCmd.MarkFlagRequired("target_ip")
 	listenCmd.MarkFlagRequired("target_port")
 	listenCmd.MarkFlagRequired("listen_port")
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// listenCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// listenCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
