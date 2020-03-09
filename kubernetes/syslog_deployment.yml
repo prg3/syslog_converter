@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog-converter
+  labels:
+    app: syslog-converter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syslog-converter
+  template:
+    metadata:
+      labels:
+        app: syslog-converter
+    spec:
+      containers:
+      - name: app
+        image: majestik/syslog_converter:latest
+        imagePullPolicy: Always
+        args: ["listen", "-t", "promtail-syslog", "-p", "1514", "-l", "514" ]
+        resources:
+          limits:
+            cpu: 0.5
+            memory: 500Mi
+        ports:
+        - containerPort: 514

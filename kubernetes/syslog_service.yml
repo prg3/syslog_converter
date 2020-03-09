@@ -1,0 +1,18 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: syslog-converter
+  namespace: default
+  annotations:
+    metallb.universe.tf/allow-shared-ip: "244"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 172.16.14.244
+  selector:
+    app: syslog-converter
+  ports:
+    - protocol: UDP
+      port: 1514
+      targetPort: 514
+      name: syslog
