@@ -1,5 +1,7 @@
 # Syslog_converter
 
+![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/majestik/syslog_converter)
+
 ## Purpose
 Converts RFC 3164 UDP syslog messages to RFC 5424 TCP messages. 
 Intended to convert messages for Promtail ingest
